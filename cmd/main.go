@@ -19,4 +19,6 @@ func main() {
 	_ = ctx
 	_ = db
 	_ = validate
+
+	logger.Info("Application started successfully")
 }

@@ -15,6 +15,7 @@ type SessionRepository interface {
 	FindByTokenHash(ctx context.Context, hash string) (*entity.Session, error)
 	Revoke(ctx context.Context, sessionID uuid.UUID) error
 	RevokeAllByUser(ctx context.Context, userID uuid.UUID) error
+	RotateToken(ctx context.Context, sessionID uuid.UUID, newTokenHash string, newExpiresAt time.Time) error
 	CleanupExpired(ctx context.Context) error
 }
 
@@ -57,6 +58,17 @@ func (r *sessionRepository) RevokeAllByUser(ctx context.Context, userID uuid.UUI
 		Model(&entity.Session{}).
 		Where("user_id = ? AND revoked_at IS NULL", userID).
 		Update("revoked_at", &now).
+		Error
+}
+
+func (r *sessionRepository) RotateToken(ctx context.Context, sessionID uuid.UUID, newTokenHash string, newExpiresAt time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(&entity.Session{}).
+		Where("id = ?", sessionID).
+		Updates(map[string]any{
+			"token_hash": newTokenHash,
+			"expires_at": newExpiresAt,
+		}).
 		Error
 }
 

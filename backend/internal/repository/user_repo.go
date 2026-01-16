@@ -17,6 +17,7 @@ type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*entity.User, error)
 	Update(ctx context.Context, user *entity.User) error
 	VerifyEmail(ctx context.Context, userID uuid.UUID) error
+	List(ctx context.Context, limit, offset int) ([]entity.User, error)
 }
 
 type userRepository struct {
@@ -66,4 +67,19 @@ func (r *userRepository) VerifyEmail(ctx context.Context, userID uuid.UUID) erro
 		Where("id = ?", userID).
 		Update("email_verified_at", &now).
 		Error
+}
+
+func (r *userRepository) List(ctx context.Context, limit, offset int) ([]entity.User, error) {
+	var users []entity.User
+	query := r.db.WithContext(ctx).Where("is_active = true").Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+	if err := query.Find(&users).Error; err != nil {
+		return nil, err
+	}
+	return users, nil
 }

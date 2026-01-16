@@ -15,7 +15,7 @@ func ConnectionDb() *gorm.DB {
 		log.Printf("error load env %s", err)
 	}
 
-	dsn := os.Getenv("POSTGRE_URL")
+	dsn := os.Getenv("DATABASE_URL")
 	db, err := gorm.Open(postgres.New(postgres.Config{
 		DSN:                  dsn,
 		PreferSimpleProtocol: true, // Disable prepared statements completely

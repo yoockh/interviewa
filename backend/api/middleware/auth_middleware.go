@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"interviewa/internal/repository"
 	"interviewa/internal/utils"
 
 	"github.com/google/uuid"
@@ -11,7 +12,8 @@ import (
 )
 
 type AuthMiddleware struct {
-	JWT *utils.JWTManager
+	JWT      *utils.JWTManager
+	Sessions repository.SessionRepository
 }
 
 func (m AuthMiddleware) RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
@@ -34,6 +36,12 @@ func (m AuthMiddleware) RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		sessionID, err := uuid.Parse(claims.SessionID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
+		}
+		if m.Sessions != nil {
+			session, err := m.Sessions.FindActiveByID(c.Request().Context(), sessionID)
+			if err != nil || session == nil {
+				return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
+			}
 		}
 		SetAuthContext(c, userID, claims.Role, sessionID)
 		return next(c)

@@ -13,6 +13,7 @@ import (
 type SessionRepository interface {
 	Create(ctx context.Context, session *entity.Session) error
 	FindByTokenHash(ctx context.Context, hash string) (*entity.Session, error)
+	FindActiveByID(ctx context.Context, sessionID uuid.UUID) (*entity.Session, error)
 	Revoke(ctx context.Context, sessionID uuid.UUID) error
 	RevokeAllByUser(ctx context.Context, userID uuid.UUID) error
 	RotateToken(ctx context.Context, sessionID uuid.UUID, newTokenHash string, newExpiresAt time.Time) error
@@ -35,6 +36,18 @@ func (r *sessionRepository) FindByTokenHash(ctx context.Context, hash string) (*
 	var session entity.Session
 	err := r.db.WithContext(ctx).
 		Where("token_hash = ? AND revoked_at IS NULL AND expires_at > NOW()", hash).
+		First(&session).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &session, err
+}
+
+func (r *sessionRepository) FindActiveByID(ctx context.Context, sessionID uuid.UUID) (*entity.Session, error) {
+	var session entity.Session
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND revoked_at IS NULL AND expires_at > NOW()", sessionID).
 		First(&session).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {

@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	"interviewa/api/handler"
@@ -22,7 +20,6 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
 	db := config.ConnectionDb()
 	validate := validator.New()
 
@@ -114,7 +111,7 @@ func main() {
 		},
 	}))
 
-	authMiddleware := middleware.AuthMiddleware{JWT: &accessManager}
+	authMiddleware := middleware.AuthMiddleware{JWT: &accessManager, Sessions: sessionRepo}
 	router := routes.NewRouter(app, authHandler, authMiddleware)
 	router.RegisterRoutes()
 
@@ -131,6 +128,4 @@ func main() {
 	if err := app.StartServer(server); err != nil {
 		logger.WithError(err).Fatal("server stopped")
 	}
-	_ = ctx
-	_ = strconv.IntSize
 }

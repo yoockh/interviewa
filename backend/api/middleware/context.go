@@ -1,40 +1,36 @@
 package middleware
 
 import (
-	"context"
-
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 )
-
-type contextKey string
 
 const (
-	contextUserIDKey  contextKey = "auth_user_id"
-	contextRoleKey    contextKey = "auth_role"
-	contextSessionKey contextKey = "auth_session_id"
+	contextUserIDKey  = "auth_user_id"
+	contextRoleKey    = "auth_role"
+	contextSessionKey = "auth_session_id"
 )
 
-func WithAuthContext(ctx context.Context, userID uuid.UUID, role string, sessionID uuid.UUID) context.Context {
-	ctx = context.WithValue(ctx, contextUserIDKey, userID)
-	ctx = context.WithValue(ctx, contextRoleKey, role)
-	ctx = context.WithValue(ctx, contextSessionKey, sessionID)
-	return ctx
+func SetAuthContext(c echo.Context, userID uuid.UUID, role string, sessionID uuid.UUID) {
+	c.Set(contextUserIDKey, userID)
+	c.Set(contextRoleKey, role)
+	c.Set(contextSessionKey, sessionID)
 }
 
-func UserIDFromContext(ctx context.Context) (uuid.UUID, bool) {
-	value := ctx.Value(contextUserIDKey)
+func UserIDFromContext(c echo.Context) (uuid.UUID, bool) {
+	value := c.Get(contextUserIDKey)
 	userID, ok := value.(uuid.UUID)
 	return userID, ok
 }
 
-func RoleFromContext(ctx context.Context) (string, bool) {
-	value := ctx.Value(contextRoleKey)
+func RoleFromContext(c echo.Context) (string, bool) {
+	value := c.Get(contextRoleKey)
 	role, ok := value.(string)
 	return role, ok
 }
 
-func SessionIDFromContext(ctx context.Context) (uuid.UUID, bool) {
-	value := ctx.Value(contextSessionKey)
+func SessionIDFromContext(c echo.Context) (uuid.UUID, bool) {
+	value := c.Get(contextSessionKey)
 	sessionID, ok := value.(uuid.UUID)
 	return sessionID, ok
 }

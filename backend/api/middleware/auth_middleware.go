@@ -4,44 +4,48 @@ import (
 	"net/http"
 	"strings"
 
+	"interviewa/internal/repository"
 	"interviewa/internal/utils"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 )
 
 type AuthMiddleware struct {
-	JWT *utils.JWTManager
+	JWT      *utils.JWTManager
+	Sessions repository.SessionRepository
 }
 
-func (m AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (m AuthMiddleware) RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
 		if m.JWT == nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+			return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 		}
-		token := extractBearerToken(r)
+		token := extractBearerToken(c.Request())
 		if token == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+			return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 		}
 		claims, err := m.JWT.ParseAccessToken(token)
 		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+			return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 		}
 		userID, err := uuid.Parse(claims.UserID)
 		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+			return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 		}
 		sessionID, err := uuid.Parse(claims.SessionID)
 		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+			return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 		}
-		ctx := WithAuthContext(r.Context(), userID, claims.Role, sessionID)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		if m.Sessions != nil {
+			session, err := m.Sessions.FindActiveByID(c.Request().Context(), sessionID)
+			if err != nil || session == nil {
+				return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
+			}
+		}
+		SetAuthContext(c, userID, claims.Role, sessionID)
+		return next(c)
+	}
 }
 
 func extractBearerToken(r *http.Request) string {

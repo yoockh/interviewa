@@ -50,6 +50,13 @@ func main() {
 		TTL:    5 * time.Minute,
 	}
 
+	appBaseURL := os.Getenv("APP_BASE_URL")
+	resendAPIKey := os.Getenv("RESEND_API_KEY")
+	resendFrom := os.Getenv("RESEND_FROM")
+	emailSender := service.NewResendEmailSender(resendAPIKey, resendFrom, appBaseURL)
+
+	mfaProvider := service.NewTOTPProvider(issuer)
+
 	userRepo := repository.NewUserRepository(db)
 	sessionRepo := repository.NewSessionRepository(db)
 	verificationRepo := repository.NewVerificationTokenRepository(db)
@@ -64,11 +71,11 @@ func main() {
 		verificationRepo,
 		mfaRepo,
 		securityRepo,
-		nil,
+		emailSender,
 		passwordHasher,
 		accessIssuer,
 		mfaIssuer,
-		nil,
+		mfaProvider,
 		service.RealClock{},
 		service.AuthConfig{
 			AccessTokenTTL:       15 * time.Minute,

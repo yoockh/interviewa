@@ -15,6 +15,10 @@ type AuthMiddleware struct {
 
 func (m AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.JWT == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		token := extractBearerToken(r)
 		if token == "" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

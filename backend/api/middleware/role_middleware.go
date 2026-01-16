@@ -1,16 +1,19 @@
 package middleware
 
-import "net/http"
+import (
+	"net/http"
 
-func RequireRole(role string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			currentRole, ok := RoleFromContext(r.Context())
+	"github.com/labstack/echo/v4"
+)
+
+func RequireRole(role string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			currentRole, ok := RoleFromContext(c)
 			if !ok || currentRole != role {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
+				return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 			}
-			next.ServeHTTP(w, r)
-		})
+			return next(c)
+		}
 	}
 }

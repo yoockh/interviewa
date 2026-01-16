@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"interviewa/internal/dto"
 	"interviewa/internal/entity"
 	"interviewa/internal/repository"
 	"interviewa/internal/utils"
@@ -63,7 +62,7 @@ func NewAuthService(
 	}
 }
 
-func (s *AuthService) Register(ctx context.Context, input dto.RegisterRequest) error {
+func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 	if strings.TrimSpace(input.Email) == "" || strings.TrimSpace(input.Password) == "" {
 		return ErrInvalidInput
 	}
@@ -117,7 +116,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) error {
 	return nil
 }
 
-func (s *AuthService) Login(ctx context.Context, input dto.LoginRequest, ipAddress *string, userAgent *string) (*dto.LoginResponse, error) {
+func (s *AuthService) Login(ctx context.Context, input LoginInput) (*LoginResult, error) {
 	if strings.TrimSpace(input.Email) == "" || strings.TrimSpace(input.Password) == "" || strings.TrimSpace(input.DeviceID) == "" {
 		return nil, ErrInvalidInput
 	}
@@ -129,12 +128,12 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginRequest, ipAddre
 	}
 	if user == nil || user.PasswordHash == nil {
 		_ = s.passwordHash.Verify(dummyPasswordHash, input.Password)
-		_ = s.logSecurity(ctx, nil, ipAddress, entity.LoginFailed, map[string]any{"email": email})
+		_ = s.logSecurity(ctx, nil, input.IPAddress, entity.LoginFailed, map[string]any{"email": email})
 		return nil, ErrInvalidCredentials
 	}
 
 	if !s.passwordHash.Verify(*user.PasswordHash, input.Password) {
-		_ = s.logSecurity(ctx, &user.ID, ipAddress, entity.LoginFailed, map[string]any{"email": email})
+		_ = s.logSecurity(ctx, &user.ID, input.IPAddress, entity.LoginFailed, map[string]any{"email": email})
 		return nil, ErrInvalidCredentials
 	}
 
@@ -152,7 +151,7 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginRequest, ipAddre
 			if err != nil {
 				return nil, err
 			}
-			return &dto.LoginResponse{
+			return &LoginResult{
 				MFARequired:       true,
 				MFAToken:          mfaToken,
 				MFATokenExpiresIn: int64(expiresIn.Seconds()),
@@ -160,16 +159,16 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginRequest, ipAddre
 		}
 	}
 
-	result, err := s.createSessionAndTokens(ctx, user, input.DeviceID, input.DeviceName, ipAddress, userAgent)
+	result, err := s.createSessionAndTokens(ctx, user, input.DeviceID, input.DeviceName, input.IPAddress, input.UserAgent)
 	if err != nil {
 		return nil, err
 	}
 
-	_ = s.logSecurity(ctx, &user.ID, ipAddress, entity.LoginSuccess, map[string]any{"device_id": input.DeviceID})
+	_ = s.logSecurity(ctx, &user.ID, input.IPAddress, entity.LoginSuccess, map[string]any{"device_id": input.DeviceID})
 	return result, nil
 }
 
-func (s *AuthService) LoginWithMFA(ctx context.Context, input dto.LoginMFARequest, ipAddress *string, userAgent *string) (*dto.LoginResponse, error) {
+func (s *AuthService) LoginWithMFA(ctx context.Context, input LoginMFAInput) (*LoginResult, error) {
 	if s.mfaProvider == nil || s.mfaTokens == nil || s.mfaSecrets == nil {
 		return nil, ErrMFANotConfigured
 	}
@@ -197,19 +196,19 @@ func (s *AuthService) LoginWithMFA(ctx context.Context, input dto.LoginMFAReques
 		return nil, ErrMFARequired
 	}
 	if !s.mfaProvider.ValidateCode(secret.Secret, input.Code) {
-		_ = s.logSecurity(ctx, &user.ID, ipAddress, entity.MFAFailed, map[string]any{"device_id": input.DeviceID})
+		_ = s.logSecurity(ctx, &user.ID, input.IPAddress, entity.MFAFailed, map[string]any{"device_id": input.DeviceID})
 		return nil, ErrInvalidMFACode
 	}
 
-	result, err := s.createSessionAndTokens(ctx, user, input.DeviceID, input.DeviceName, ipAddress, userAgent)
+	result, err := s.createSessionAndTokens(ctx, user, input.DeviceID, input.DeviceName, input.IPAddress, input.UserAgent)
 	if err != nil {
 		return nil, err
 	}
-	_ = s.logSecurity(ctx, &user.ID, ipAddress, entity.LoginSuccess, map[string]any{"device_id": input.DeviceID, "mfa": true})
+	_ = s.logSecurity(ctx, &user.ID, input.IPAddress, entity.LoginSuccess, map[string]any{"device_id": input.DeviceID, "mfa": true})
 	return result, nil
 }
 
-func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*dto.LoginResponse, error) {
+func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*LoginResult, error) {
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil, ErrInvalidInput
 	}
@@ -244,7 +243,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*dto.Lo
 		return nil, err
 	}
 
-	return &dto.LoginResponse{
+	return &LoginResult{
 		AccessToken:      accessToken,
 		ExpiresIn:        int64(expiresIn.Seconds()),
 		RefreshToken:     newRefreshToken,
@@ -424,7 +423,7 @@ func (s *AuthService) createSessionAndTokens(
 	deviceName string,
 	ipAddress *string,
 	userAgent *string,
-) (*dto.LoginResponse, error) {
+) (*LoginResult, error) {
 	refreshToken, refreshHash, refreshExpiry, err := s.buildRefreshToken()
 	if err != nil {
 		return nil, err
@@ -448,7 +447,7 @@ func (s *AuthService) createSessionAndTokens(
 		return nil, err
 	}
 
-	return &dto.LoginResponse{
+	return &LoginResult{
 		AccessToken:      accessToken,
 		ExpiresIn:        int64(expiresIn.Seconds()),
 		RefreshToken:     refreshToken,

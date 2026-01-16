@@ -48,14 +48,12 @@ type Clock interface {
 	Now() time.Time
 }
 
-// RealClock implements Clock using the real time
 type RealClock struct{}
 
 func (RealClock) Now() time.Time {
 	return time.Now()
 }
 
-// BcryptPasswordHasher implements PasswordHasher using bcrypt
 type BcryptPasswordHasher struct {
 	Cost int
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 )
 
 type AuthHandler struct {
@@ -35,257 +36,237 @@ func NewAuthHandler(svc *service.AuthService, validate *validator.Validate) *Aut
 	}
 }
 
-func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) Register(c echo.Context) error {
 	var req dto.RegisterRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeJSON(c, &req); err != nil {
+		return writeError(c, http.StatusBadRequest, err)
 	}
 	if err := h.validate(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return writeError(c, http.StatusBadRequest, err)
 	}
-	if err := h.Service.Register(r.Context(), req); err != nil {
-		writeServiceError(w, err)
-		return
+	input := service.RegisterInput{Email: req.Email, Password: req.Password}
+	if err := h.Service.Register(c.Request().Context(), input); err != nil {
+		return writeServiceError(c, err)
 	}
-	w.WriteHeader(http.StatusCreated)
+	return c.NoContent(http.StatusCreated)
 }
 
-func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) VerifyEmail(c echo.Context) error {
 	var req dto.VerifyEmailRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeJSON(c, &req); err != nil {
+		return writeError(c, http.StatusBadRequest, err)
 	}
 	if err := h.validate(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return writeError(c, http.StatusBadRequest, err)
 	}
-	if err := h.Service.VerifyEmail(r.Context(), req.Token); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := h.Service.VerifyEmail(c.Request().Context(), req.Token); err != nil {
+		return writeServiceError(c, err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) Login(c echo.Context) error {
 	var req dto.LoginRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeJSON(c, &req); err != nil {
+		return writeError(c, http.StatusBadRequest, err)
 	}
 	if err := h.validate(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return writeError(c, http.StatusBadRequest, err)
 	}
-	ipAddress := extractIP(r)
-	userAgent := r.UserAgent()
-	result, err := h.Service.Login(r.Context(), req, stringPtr(ipAddress), stringPtr(userAgent))
+	input := service.LoginInput{
+		Email:      req.Email,
+		Password:   req.Password,
+		DeviceID:   req.DeviceID,
+		DeviceName: req.DeviceName,
+		IPAddress:  stringPtr(c.RealIP()),
+		UserAgent:  stringPtr(c.Request().UserAgent()),
+	}
+	result, err := h.Service.Login(c.Request().Context(), input)
 	if err != nil {
-		writeServiceError(w, err)
-		return
+		return writeServiceError(c, err)
 	}
+	response := mapLoginResponse(result)
 	if !result.MFARequired {
-		h.setRefreshCookie(w, result.RefreshToken, result.RefreshExpiresIn)
-		result.RefreshToken = ""
-		result.RefreshExpiresIn = 0
+		h.setRefreshCookie(c, result.RefreshToken, result.RefreshExpiresIn)
+		response.RefreshToken = ""
+		response.RefreshExpiresIn = 0
 	}
-	writeJSON(w, http.StatusOK, result)
+	return c.JSON(http.StatusOK, response)
 }
 
-func (h *AuthHandler) LoginWithMFA(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) LoginWithMFA(c echo.Context) error {
 	var req dto.LoginMFARequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeJSON(c, &req); err != nil {
+		return writeError(c, http.StatusBadRequest, err)
 	}
 	if err := h.validate(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return writeError(c, http.StatusBadRequest, err)
 	}
-	ipAddress := extractIP(r)
-	userAgent := r.UserAgent()
-	result, err := h.Service.LoginWithMFA(r.Context(), req, stringPtr(ipAddress), stringPtr(userAgent))
+	input := service.LoginMFAInput{
+		MFAToken:   req.MFAToken,
+		Code:       req.Code,
+		DeviceID:   req.DeviceID,
+		DeviceName: req.DeviceName,
+		IPAddress:  stringPtr(c.RealIP()),
+		UserAgent:  stringPtr(c.Request().UserAgent()),
+	}
+	result, err := h.Service.LoginWithMFA(c.Request().Context(), input)
 	if err != nil {
-		writeServiceError(w, err)
-		return
+		return writeServiceError(c, err)
 	}
-	h.setRefreshCookie(w, result.RefreshToken, result.RefreshExpiresIn)
-	result.RefreshToken = ""
-	result.RefreshExpiresIn = 0
-	writeJSON(w, http.StatusOK, result)
+	response := mapLoginResponse(result)
+	h.setRefreshCookie(c, result.RefreshToken, result.RefreshExpiresIn)
+	response.RefreshToken = ""
+	response.RefreshExpiresIn = 0
+	return c.JSON(http.StatusOK, response)
 }
 
-func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
-	refreshToken := h.readRefreshCookie(r)
+func (h *AuthHandler) Refresh(c echo.Context) error {
+	refreshToken := h.readRefreshCookie(c)
 	if refreshToken == "" {
-		writeError(w, http.StatusUnauthorized, errors.New("missing refresh token"))
-		return
+		return writeError(c, http.StatusUnauthorized, errors.New("missing refresh token"))
 	}
-	result, err := h.Service.Refresh(r.Context(), refreshToken)
+	result, err := h.Service.Refresh(c.Request().Context(), refreshToken)
 	if err != nil {
-		writeServiceError(w, err)
-		return
+		return writeServiceError(c, err)
 	}
-	h.setRefreshCookie(w, result.RefreshToken, result.RefreshExpiresIn)
-	result.RefreshToken = ""
-	result.RefreshExpiresIn = 0
-	writeJSON(w, http.StatusOK, result)
+	response := mapLoginResponse(result)
+	h.setRefreshCookie(c, result.RefreshToken, result.RefreshExpiresIn)
+	response.RefreshToken = ""
+	response.RefreshExpiresIn = 0
+	return c.JSON(http.StatusOK, response)
 }
 
-func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
+func (h *AuthHandler) Logout(c echo.Context) error {
+	userID, ok := middleware.UserIDFromContext(c)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
-		return
+		return writeError(c, http.StatusUnauthorized, errors.New("unauthorized"))
 	}
-	sessionID, ok := middleware.SessionIDFromContext(r.Context())
+	sessionID, ok := middleware.SessionIDFromContext(c)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
-		return
+		return writeError(c, http.StatusUnauthorized, errors.New("unauthorized"))
 	}
-	ipAddress := extractIP(r)
-	if err := h.Service.Logout(r.Context(), sessionID, &userID, stringPtr(ipAddress)); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := h.Service.Logout(c.Request().Context(), sessionID, &userID, stringPtr(c.RealIP())); err != nil {
+		return writeServiceError(c, err)
 	}
-	h.clearRefreshCookie(w)
-	w.WriteHeader(http.StatusNoContent)
+	h.clearRefreshCookie(c)
+	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *AuthHandler) LogoutAll(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
+func (h *AuthHandler) LogoutAll(c echo.Context) error {
+	userID, ok := middleware.UserIDFromContext(c)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
-		return
+		return writeError(c, http.StatusUnauthorized, errors.New("unauthorized"))
 	}
-	ipAddress := extractIP(r)
-	if err := h.Service.LogoutAll(r.Context(), userID, stringPtr(ipAddress)); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := h.Service.LogoutAll(c.Request().Context(), userID, stringPtr(c.RealIP())); err != nil {
+		return writeServiceError(c, err)
 	}
-	h.clearRefreshCookie(w)
-	w.WriteHeader(http.StatusNoContent)
+	h.clearRefreshCookie(c)
+	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *AuthHandler) PasswordForgot(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) PasswordForgot(c echo.Context) error {
 	var req dto.PasswordForgotRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeJSON(c, &req); err != nil {
+		return writeError(c, http.StatusBadRequest, err)
 	}
 	if err := h.validate(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return writeError(c, http.StatusBadRequest, err)
 	}
-	if err := h.Service.RequestPasswordReset(r.Context(), req.Email); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := h.Service.RequestPasswordReset(c.Request().Context(), req.Email); err != nil {
+		return writeServiceError(c, err)
 	}
-	w.WriteHeader(http.StatusAccepted)
+	return c.NoContent(http.StatusAccepted)
 }
 
-func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) PasswordReset(c echo.Context) error {
 	var req dto.PasswordResetRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeJSON(c, &req); err != nil {
+		return writeError(c, http.StatusBadRequest, err)
 	}
 	if err := h.validate(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return writeError(c, http.StatusBadRequest, err)
 	}
-	if err := h.Service.ResetPassword(r.Context(), req.Token, req.NewPassword); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := h.Service.ResetPassword(c.Request().Context(), req.Token, req.NewPassword); err != nil {
+		return writeServiceError(c, err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *AuthHandler) EnableMFA(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
+func (h *AuthHandler) EnableMFA(c echo.Context) error {
+	userID, ok := middleware.UserIDFromContext(c)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
-		return
+		return writeError(c, http.StatusUnauthorized, errors.New("unauthorized"))
 	}
-	qr, err := h.Service.EnableMFA(r.Context(), userID)
+	qr, err := h.Service.EnableMFA(c.Request().Context(), userID)
 	if err != nil {
-		writeServiceError(w, err)
-		return
+		return writeServiceError(c, err)
 	}
-	writeJSON(w, http.StatusOK, dto.MFAEnableResponse{QRCode: qr})
+	return c.JSON(http.StatusOK, dto.MFAEnableResponse{QRCode: qr})
 }
 
-func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
+func (h *AuthHandler) VerifyMFA(c echo.Context) error {
+	userID, ok := middleware.UserIDFromContext(c)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
-		return
+		return writeError(c, http.StatusUnauthorized, errors.New("unauthorized"))
 	}
 	var req dto.MFAVerifyRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeJSON(c, &req); err != nil {
+		return writeError(c, http.StatusBadRequest, err)
 	}
 	if err := h.validate(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return writeError(c, http.StatusBadRequest, err)
 	}
-	if err := h.Service.VerifyMFA(r.Context(), userID, req.Code); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := h.Service.VerifyMFA(c.Request().Context(), userID, req.Code); err != nil {
+		return writeServiceError(c, err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *AuthHandler) DisableMFA(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
+func (h *AuthHandler) DisableMFA(c echo.Context) error {
+	userID, ok := middleware.UserIDFromContext(c)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
-		return
+		return writeError(c, http.StatusUnauthorized, errors.New("unauthorized"))
 	}
-	if err := h.Service.DisableMFA(r.Context(), userID); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := h.Service.DisableMFA(c.Request().Context(), userID); err != nil {
+		return writeServiceError(c, err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
+func (h *AuthHandler) Me(c echo.Context) error {
+	userID, ok := middleware.UserIDFromContext(c)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
-		return
+		return writeError(c, http.StatusUnauthorized, errors.New("unauthorized"))
 	}
-	user, err := h.Service.GetCurrentUser(r.Context(), userID)
+	user, err := h.Service.GetCurrentUser(c.Request().Context(), userID)
 	if err != nil {
-		writeServiceError(w, err)
-		return
+		return writeServiceError(c, err)
 	}
 	if user == nil {
-		writeError(w, http.StatusNotFound, errors.New("user not found"))
-		return
+		return writeError(c, http.StatusNotFound, errors.New("user not found"))
 	}
-	writeJSON(w, http.StatusOK, dto.UserResponseFromEntity(user))
+	return c.JSON(http.StatusOK, dto.UserResponseFromEntity(user))
 }
 
-func (h *AuthHandler) AdminListUsers(w http.ResponseWriter, r *http.Request) {
-	limit, offset := parseLimitOffset(r)
-	users, err := h.Service.ListUsers(r.Context(), limit, offset)
+func (h *AuthHandler) AdminListUsers(c echo.Context) error {
+	limit, offset := parseLimitOffset(c)
+	users, err := h.Service.ListUsers(c.Request().Context(), limit, offset)
 	if err != nil {
-		writeServiceError(w, err)
-		return
+		return writeServiceError(c, err)
 	}
-	writeJSON(w, http.StatusOK, dto.UserResponsesFromEntities(users))
+	return c.JSON(http.StatusOK, dto.UserResponsesFromEntities(users))
 }
 
-func (h *AuthHandler) AdminRevokeUserSessions(w http.ResponseWriter, r *http.Request, userID uuid.UUID) {
-	if err := h.Service.RevokeUserSessions(r.Context(), userID); err != nil {
-		writeServiceError(w, err)
-		return
+func (h *AuthHandler) AdminRevokeUserSessions(c echo.Context) error {
+	userID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return writeError(c, http.StatusBadRequest, errors.New("invalid user id"))
 	}
-	w.WriteHeader(http.StatusNoContent)
+	if err := h.Service.RevokeUserSessions(c.Request().Context(), userID); err != nil {
+		return writeServiceError(c, err)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 func (h *AuthHandler) validate(payload any) error {
@@ -295,7 +276,7 @@ func (h *AuthHandler) validate(payload any) error {
 	return h.Validate.Struct(payload)
 }
 
-func (h *AuthHandler) setRefreshCookie(w http.ResponseWriter, token string, expiresIn int64) {
+func (h *AuthHandler) setRefreshCookie(c echo.Context, token string, expiresIn int64) {
 	if token == "" {
 		return
 	}
@@ -303,7 +284,7 @@ func (h *AuthHandler) setRefreshCookie(w http.ResponseWriter, token string, expi
 	if maxAge < 0 {
 		maxAge = 0
 	}
-	http.SetCookie(w, &http.Cookie{
+	c.SetCookie(&http.Cookie{
 		Name:     h.RefreshCookieName,
 		Value:    token,
 		Path:     "/",
@@ -316,8 +297,8 @@ func (h *AuthHandler) setRefreshCookie(w http.ResponseWriter, token string, expi
 	})
 }
 
-func (h *AuthHandler) clearRefreshCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+func (h *AuthHandler) clearRefreshCookie(c echo.Context) {
+	c.SetCookie(&http.Cookie{
 		Name:     h.RefreshCookieName,
 		Value:    "",
 		Path:     "/",
@@ -329,33 +310,25 @@ func (h *AuthHandler) clearRefreshCookie(w http.ResponseWriter) {
 	})
 }
 
-func (h *AuthHandler) readRefreshCookie(r *http.Request) string {
-	cookie, err := r.Cookie(h.RefreshCookieName)
+func (h *AuthHandler) readRefreshCookie(c echo.Context) string {
+	cookie, err := c.Cookie(h.RefreshCookieName)
 	if err != nil {
 		return ""
 	}
 	return cookie.Value
 }
 
-func decodeJSON(r *http.Request, target any) error {
-	decoder := json.NewDecoder(r.Body)
+func decodeJSON(c echo.Context, target any) error {
+	decoder := json.NewDecoder(c.Request().Body)
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(target)
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if payload != nil {
-		_ = json.NewEncoder(w).Encode(payload)
-	}
+func writeError(c echo.Context, status int, err error) error {
+	return c.JSON(status, map[string]string{"message": err.Error()})
 }
 
-func writeError(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]string{"message": err.Error()})
-}
-
-func writeServiceError(w http.ResponseWriter, err error) {
+func writeServiceError(c echo.Context, err error) error {
 	status := http.StatusInternalServerError
 	switch {
 	case errors.Is(err, service.ErrInvalidInput):
@@ -375,26 +348,13 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrUserNotFound):
 		status = http.StatusNotFound
 	}
-	writeError(w, status, err)
+	return writeError(c, status, err)
 }
 
-func parseLimitOffset(r *http.Request) (int, int) {
-	query := r.URL.Query()
-	limit, _ := strconv.Atoi(query.Get("limit"))
-	offset, _ := strconv.Atoi(query.Get("offset"))
+func parseLimitOffset(c echo.Context) (int, int) {
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	offset, _ := strconv.Atoi(c.QueryParam("offset"))
 	return limit, offset
-}
-
-func extractIP(r *http.Request) string {
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		parts := strings.Split(forwarded, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	if host, _, found := strings.Cut(r.RemoteAddr, ":"); found {
-		return host
-	}
-	return r.RemoteAddr
 }
 
 func stringPtr(value string) *string {
@@ -402,4 +362,19 @@ func stringPtr(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func mapLoginResponse(result *service.LoginResult) *dto.LoginResponse {
+	if result == nil {
+		return &dto.LoginResponse{}
+	}
+	return &dto.LoginResponse{
+		AccessToken:       result.AccessToken,
+		ExpiresIn:         result.ExpiresIn,
+		RefreshToken:      result.RefreshToken,
+		RefreshExpiresIn:  result.RefreshExpiresIn,
+		MFARequired:       result.MFARequired,
+		MFAToken:          result.MFAToken,
+		MFATokenExpiresIn: result.MFATokenExpiresIn,
+	}
 }

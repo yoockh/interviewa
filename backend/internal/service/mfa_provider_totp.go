@@ -58,12 +58,16 @@ func (p *TOTPProvider) QRCodeURL(email string, issuer string, secret string) (st
 }
 
 func (p *TOTPProvider) ValidateCode(secret string, code string) bool {
-	return totp.ValidateCustom(code, secret, time.Now(), totp.ValidateOpts{
+	valid, err := totp.ValidateCustom(code, secret, time.Now(), totp.ValidateOpts{
 		Period:    p.period(),
 		Skew:      p.skew(),
 		Digits:    p.digits(),
 		Algorithm: p.algorithm(),
 	})
+	if err != nil {
+		return false
+	}
+	return valid
 }
 
 func (p *TOTPProvider) period() uint {

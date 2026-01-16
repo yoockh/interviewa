@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"interviewa/api/handler"
-	"interviewa/api/middleware"
+	apiMiddleware "interviewa/api/middleware"
 	"interviewa/api/routes"
 	"interviewa/config"
 	"interviewa/internal/repository"
@@ -15,7 +15,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	echoMiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/sirupsen/logrus"
 )
 
@@ -87,15 +87,15 @@ func main() {
 	app := echo.New()
 	app.HideBanner = true
 	app.HidePort = true
-	app.Use(middleware.Recover())
-	app.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+	app.Use(echoMiddleware.Recover())
+	app.Use(echoMiddleware.RequestLoggerWithConfig(echoMiddleware.RequestLoggerConfig{
 		LogStatus:   true,
 		LogMethod:   true,
 		LogURI:      true,
 		LogRemoteIP: true,
 		LogError:    true,
 		HandleError: true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+		LogValuesFunc: func(c echo.Context, v echoMiddleware.RequestLoggerValues) error {
 			entry := logger.WithFields(logrus.Fields{
 				"status": v.Status,
 				"method": v.Method,
@@ -111,7 +111,7 @@ func main() {
 		},
 	}))
 
-	authMiddleware := middleware.AuthMiddleware{JWT: &accessManager, Sessions: sessionRepo}
+	authMiddleware := apiMiddleware.AuthMiddleware{JWT: &accessManager, Sessions: sessionRepo}
 	router := routes.NewRouter(app, authHandler, authMiddleware)
 	router.RegisterRoutes()
 

@@ -55,3 +55,18 @@ CREATE TABLE mfa_secrets (
 
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE TABLE security_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    user_id UUID,
+    ip_address VARCHAR(45),
+    action VARCHAR(50),
+    -- 'login_failed', 'login_success', 'password_reset', 'mfa_failed'
+
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_security_logs_user_id ON security_logs(user_id);
+CREATE INDEX idx_security_logs_ip ON security_logs(ip_address);
